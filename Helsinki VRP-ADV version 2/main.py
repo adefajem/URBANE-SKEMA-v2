@@ -35,14 +35,14 @@ def main():
     robot_df = pd.read_excel(problem_input_filename, sheet_name='robot')
     robot_speed = robot_df['robot speed (metres per second)'][0] 
 
-    # Electricity generation info - READ FROM FILE
+    # Electricity generation info
     electricity_inputs = pd.read_excel(problem_input_filename, sheet_name='electricity_generation_breakdwn')
     emission_factor = list(electricity_inputs['Emission Factor'])
     generation_percentage = list(electricity_inputs['Generation Percentage'])
 
-    # Battery capacity of electric vehicle in kWh - READ FROM FILE
+    # Battery capacity of electric vehicle in kWh
     battery_capacity = robot_df['battery capacity (kWh)'].values[0]
-
+    
     # Service time per parcel
     average_serve_time_per_parcel = robot_df['average service time per parcel (seconds)'].values[0]
 
