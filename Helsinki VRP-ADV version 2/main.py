@@ -31,21 +31,22 @@ def main():
     wait_times = problem_input_data.set_index('postcode')['wait time (seconds)'].to_dict() 
     wait_times_list = [wait_times[postcode] for postcode in all_nodes_df['postcode']] # map list order to order in all_nodes_df
 
+    arrival_rate = problem_input_data.set_index('postcode')['customer arrival rate (per minute)'].to_dict() 
+
     # The robot moves on the sidewalk at walking speed, which is about 1.42 metres per second
     robot_df = pd.read_excel(problem_input_filename, sheet_name='robot')
     robot_speed = robot_df['robot speed (metres per second)'][0] 
 
-    # Electricity generation info
+    # Electricity generation info - READ FROM FILE
     electricity_inputs = pd.read_excel(problem_input_filename, sheet_name='electricity_generation_breakdwn')
     emission_factor = list(electricity_inputs['Emission Factor'])
     generation_percentage = list(electricity_inputs['Generation Percentage'])
 
-    # Battery capacity of electric vehicle in kWh
+    # Battery capacity of electric vehicle in kWh - READ FROM FILE
     battery_capacity = robot_df['battery capacity (kWh)'].values[0]
-    
-    # Service time per parcel
-    average_serve_time_per_parcel = robot_df['average service time per parcel (seconds)'].values[0]
 
+    # Service time per parcel
+    average_serve_time_per_parcel = robot_df['service rate (per minute)'].values[0]
     
     # --- Do routing ---
     distance_matrix, travel_time_matrix = functions.generate_distance_time_matrices(all_nodes_df, robot_speed)
@@ -64,7 +65,7 @@ def main():
     emissions_df = pd.DataFrame([total_emissions], columns=['Total CO2 emissions (gCO2eq)'])
 
     # Get robot arrival times at destination nodes and number of parcels delivered
-    result = functions.output_result(routing_solution, all_nodes_df, destinations_counts_df, wait_times_list, average_serve_time_per_parcel)
+    result = functions.output_result(routing_solution, all_nodes_df, destinations_counts_df,arrival_rate, wait_times, average_serve_time_per_parcel)
     
     # Write to file
     result_filename = 'output/results_1.xlsx'

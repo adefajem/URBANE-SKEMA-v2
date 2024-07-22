@@ -1,3 +1,4 @@
+import numpy as np
 import pandas as pd
 from pyproj import CRS, Transformer
 from geopy.distance import geodesic
@@ -184,8 +185,42 @@ def calculate_routing_emissions(sol_df, emissions_matrix_EV):
         total_emissions_d = None
     return total_emissions_d  
 
+def single_server_queue(arrival_rate, service_rate, num_customers, max_service_time):
+    ''' M/M/1 single-server queue '''    
+    # Initialize variables
+    inter_arrival_times = np.random.exponential(1 / arrival_rate, num_customers)
+    arrival_times = np.cumsum(inter_arrival_times)
+    service_times = np.random.exponential(1 / service_rate, num_customers)
+    
+    # Simulate the queue
+    departure_times = []
+    current_time = 0
+    served_customers = 0
+    for i in range(num_customers):
+        if len(departure_times) == 0 or arrival_times[i] >= departure_times[-1]:
+            current_time = arrival_times[i]
+        else:
+            current_time = departure_times[-1]
 
-def output_result(route_sol, all_nodes_df, destinations_counts_df, wait_times, average_serve_time_per_parcel):    
+        # Check if the service can be completed within the max service time
+        if current_time + service_times[i] <= max_service_time:
+            departure_times.append(current_time + service_times[i])
+            served_customers += 1
+        else:
+            break
+    
+    # Calculate the percentage of customers served
+    percentage_served = round((served_customers / num_customers) * 100, 2)
+    
+    # Calculate metrics for served customers
+    if served_customers > 0:
+        waiting_times = np.array(departure_times)[:served_customers] - np.array(arrival_times)[:served_customers]
+        average_waiting_time = round(np.mean(waiting_times), 2)
+        average_queue_length = round(np.mean([np.sum((arrival_times[:served_customers] <= t) & (t < np.array(departure_times)[:served_customers])) for t in arrival_times[:served_customers]]), 2)
+    
+    return served_customers, percentage_served, average_waiting_time, average_queue_length
+
+def output_result(route_sol, all_nodes_df, destinations_counts_df, arrival_rate, wait_times, average_serve_time_per_parcel):    
     result = None    
     # Extract times
     t_rows = route_sol[route_sol['name'].str.startswith('s')]    
@@ -220,20 +255,21 @@ def output_result(route_sol, all_nodes_df, destinations_counts_df, wait_times, a
     postcode_and_counts = destinations_counts_df[['Postcode_Dzone','Number_of_parcels_to_deliver']]
     postcode_and_counts = postcode_and_counts.rename(columns={'Postcode_Dzone': 'Delivery_point'})
     result = pd.merge(result, postcode_and_counts, on='Delivery_point')
-    num_delivered = []
-    for i in range(len(list(wait_times[1:]))):
-        num_delivered.append(int(list(wait_times[1:])[i]/average_serve_time_per_parcel))
-
-    result['Number_of_parcels_delivered'] = num_delivered    
-    for p in range(len(result['Number_of_parcels_delivered'])):
-        if result['Number_of_parcels_delivered'][p] > result['Number_of_parcels_to_deliver'][p]:
-            result['Number_of_parcels_delivered'][p] = result['Number_of_parcels_to_deliver'][p]
     
-    pctg_delivered = round(result['Number_of_parcels_delivered']/result['Number_of_parcels_to_deliver'], 2)
-    for j in range(len(pctg_delivered)):
-        if pctg_delivered[j] > 1:
-            pctg_delivered[j] = 1
-            
-    pctg_delivered = pctg_delivered * 100
-    result['Percentage_of_parcels_delivered_(%)'] = pctg_delivered    
+    result['Number_of_parcels_delivered'] = ''
+    result['Percentage_of_parcels_delivered_(%)'] = ''
+    result['Average_waiting_time_(minutes)'] = ''
+    result['Average_queue_length'] = ''
+
+    for row in range(len(result)):
+        current_node = result['Delivery_point'][row]
+        num_customers = result['Number_of_parcels_to_deliver'][result['Delivery_point'] == current_node].values[0]
+        max_service_time =  wait_times[current_node]/60 # in minutes
+        served_customers, percentage_served, average_waiting_time, average_queue_length = single_server_queue(arrival_rate[current_node], average_serve_time_per_parcel, num_customers, max_service_time)
+
+        result['Number_of_parcels_delivered'][row] = served_customers
+        result['Percentage_of_parcels_delivered_(%)'][row] = percentage_served
+        result['Average_waiting_time_(minutes)'][row] = average_waiting_time
+        result['Average_queue_length'][row] = average_queue_length
+ 
     return result
