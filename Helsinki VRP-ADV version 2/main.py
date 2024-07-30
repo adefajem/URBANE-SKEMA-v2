@@ -17,7 +17,7 @@ def main():
     num_nodes = len(all_nodes_df)
     
     # Read in problem data
-    problem_input_filename = 'input/test_input_1.xlsx'
+    problem_input_filename = 'input/test_input_3.xlsx'
     problem_input_data = pd.read_excel(problem_input_filename, sheet_name='problem_input')
 
     earliest = problem_input_data.set_index('postcode')['earliest'].to_dict()
@@ -61,17 +61,19 @@ def main():
     # --- Output --- 
     # Get total emissions
     emissions_matrix_EV =  functions.get_emissions_matrix_EV(battery_capacity, emission_factor, generation_percentage, distance_matrix, travel_time_matrix, num_nodes)
-    total_emissions = functions.calculate_routing_emissions(routing_solution, emissions_matrix_EV)
+    total_emissions, total_distance = functions.calculate_total_emissions_and_distance(routing_solution, emissions_matrix_EV, distance_matrix)
     emissions_df = pd.DataFrame([total_emissions], columns=['Total CO2 emissions (gCO2eq)'])
+    distance_df = pd.DataFrame([total_distance/1000], columns=['Total distance (km)'])
 
     # Get robot arrival times at destination nodes and number of parcels delivered
     result = functions.output_result(routing_solution, all_nodes_df, destinations_counts_df,arrival_rate, wait_times, average_serve_time_per_parcel)
     
     # Write to file
-    result_filename = 'output/results_1.xlsx'
+    result_filename = 'output/results_4.xlsx'
     with pd.ExcelWriter(result_filename) as writer:  
         result.to_excel(writer, sheet_name='Delivery_results', index = False)        
         emissions_df.to_excel(writer, sheet_name='Total_emissions', index = False)
+        distance_df.to_excel(writer, sheet_name='Total_distance', index = False)
 
 
     

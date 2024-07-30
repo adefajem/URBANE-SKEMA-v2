@@ -134,11 +134,9 @@ def robot_routing(distance_matrix, time_matrix, bigM_matrix, earliest, latest, w
     # Solve
     solution = model.solve(log_output = False)   
     print(model.solve_status.name)
-    obj_val = None
     sol_df = None
 
     if model.solve_status.name == 'OPTIMAL_SOLUTION' or model.solve_status.name == 'FEASIBLE_SOLUTION':
-        obj_val = solution.get_objective_value()
         sol_df = solution.as_df()    
     return sol_df
 
@@ -164,8 +162,7 @@ def get_emissions_matrix_EV(battery_capacity, emission_factor, generation_percen
     E_ij = [emission_ij[i:i+num_nodes] for i in range(0, len(emission_ij), num_nodes)]                    
     return E_ij
 
-
-def calculate_routing_emissions(sol_df, emissions_matrix_EV):
+def calculate_total_emissions_and_distance(sol_df, emissions_matrix_EV, distance_matrix):
     if sol_df is not None:
         x_rows = sol_df[sol_df['name'].str.startswith('x_')]
         x_rows.reset_index(inplace=True, drop=True)
@@ -175,15 +172,18 @@ def calculate_routing_emissions(sol_df, emissions_matrix_EV):
                 if x_rows.loc[i]['value'] < 0.1:
                     x_rows.drop([i], inplace=True)
         x_rows.reset_index(inplace=True)
-        total_emissions_d = 0
+        total_emissions = 0
+        total_distance = 0
         for i in range(x_rows.shape[0]):
             row = x_rows['name'][i].split('_')
             row.pop(0);    
             row = [int(i) for i in row]
-            total_emissions_d += emissions_matrix_EV[row[1]][row[2]]
+            total_emissions += emissions_matrix_EV[row[1]][row[2]]
+            total_distance += distance_matrix[row[1]][row[2]]
     else:
-        total_emissions_d = None
-    return total_emissions_d  
+        total_emissions = None
+        total_distance = None
+    return total_emissions, total_distance  
 
 def single_server_queue(arrival_rate, service_rate, num_customers, max_service_time):
     ''' M/M/1 single-server queue '''    
