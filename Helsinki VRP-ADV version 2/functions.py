@@ -18,6 +18,8 @@ def convert_coordinates(x_3879, y_3879):
 
 def process_parcel_demand_data(parcel_demand_filename):    
     parcel_demand_df = pd.read_csv(parcel_demand_filename)
+    parcel_demand_df = parcel_demand_df[parcel_demand_df['Latest_Order']=='ADV']
+    parcel_demand_df = parcel_demand_df.reset_index(drop=True)
     # Get postcodes and convert X and Y coordinates to latitudes and longitudes
     # Apply the conversion to each row
     parcel_demand_df[['O_latitude', 'O_longitude']] = parcel_demand_df.apply(
