@@ -15,7 +15,6 @@ def Last_Mile_Follower(y, lamda, V2d, A2d, fol_depot, locker_nodes, packages, de
     model.parameters.timelimit = time_limit_seconds
     model.parameters.mip.tolerances.mipgap = 1e-2
     model.parameters.emphasis.mip = mip_emphasis
-    model.parameters.threads = 4
     
     # --- Sets ---
     
