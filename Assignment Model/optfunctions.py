@@ -249,7 +249,6 @@ def solve_CL_leader(max_num_DSPs, lm_config, max_num_nodes, max_num_destinations
     model.parameters.timelimit = 900 # seconds
     model.parameters.mip.tolerances.mipgap = 1e-2
     model.parameters.emphasis.mip = 1 # prioritize feasible solutions
-    model.parameters.threads = 4    
     
     # --- Optimization ---
     # Create a dict that maps z_f to y_p_d and lamda_p_s
@@ -361,7 +360,6 @@ def Last_Mile_Follower(y, lamda, V2d, A2d, fol_depot, locker_nodes, packages, de
     model.parameters.timelimit = time_limit_seconds
     model.parameters.mip.tolerances.mipgap = 1e-2
     model.parameters.emphasis.mip = 1
-    model.parameters.threads = 4
     
     # --- Sets ---
     
