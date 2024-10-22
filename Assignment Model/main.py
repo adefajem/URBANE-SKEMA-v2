@@ -18,7 +18,7 @@ def main():
     complete_network = pd.read_excel(complete_network_filename)
     
     # Read in instance and confirm that size of instance is less than that of original network
-    instance_filename = 'input/test_input_1.xlsx'
+    instance_filename = 'input/test_input_4.xlsx'
     instance_network = pd.read_excel(instance_filename, sheet_name='problem_instance_info')
     max_num_nodes = len(complete_network)
     num_original_LMs = len(complete_network[complete_network['type'].str.contains('depot', case=False)])
@@ -30,20 +30,18 @@ def main():
     assert num_instance_LMs <= num_original_LMs, 'The instance network should be smaller or the same size as the complete network'
     assert num_instance_microhubs <= num_original_microhubs, 'The instance network should be smaller or the same size as the complete network'
     assert num_instance_destinations <= num_original_destinations, 'The instance network should be smaller or the same size as the complete network'
-    inst_locker_dfs = instance_network[instance_network['type']=='locker']
-    comp_net_locker_dfs = complete_network[complete_network['type']=='locker']
-    closest_lockers_map_back = optfunctions.map_closest_lockers_back(comp_net_locker_dfs, inst_locker_dfs)
     
     
     # Create instance: do matching of DSPs to lockers and parcels to locations
     all_locker_nodes = list(complete_network[complete_network['type']=='locker']['node'])
-    package_destination_ids, destinations, dsp_depots, dsp_d_nodes, dsp_d_arcs, lm_config, selected_locker_nodes, max_locker_capacities, lm_lookup, locker_lookup, destination_lookup = optfunctions.output_problem_instance(complete_network, instance_network)
+    package_destination_ids, destinations, dsp_depots, dsp_d_nodes, dsp_d_arcs, lm_config, selected_locker_nodes, selected_locker_capacities, max_locker_capacities, lm_lookup, locker_lookup, destination_lookup = optfunctions.output_problem_instance(complete_network, instance_network)
     
+
     # Use CL to find optimal y and lamda assignments
     satellite_penalty = 5000
-    y_sol_cl, lamda_sol_cl = optfunctions.solve_CL_leader(num_original_LMs, lm_config, max_num_nodes, num_original_destinations, 
+    y_sol_cl, lamda_sol_cl, lamda_df = optfunctions.solve_CL_leader(num_original_LMs, lm_config, max_num_nodes, num_original_destinations, 
                                                 package_destination_ids, all_locker_nodes, selected_locker_nodes,
-                                                    max_locker_capacities, learned_constraint, satellite_penalty)
+                                                    max_locker_capacities,selected_locker_capacities, learned_constraint, satellite_penalty)
     
     # Post-process (route) LM followers to get LM emissions
     # Number of LM vehicles
@@ -103,12 +101,10 @@ def main():
             t_Sol_DFs.append(t_sol)
     
     # Write results to file
-    res_filename = 'output/results_1.xlsx'
-    optfunctions.write_instance_results_to_file(res_filename, y_sol_cl, lamda_sol_cl, xm_Sol_DFs, t_Sol_DFs,
-                                       distance_matrix, emissions_matrix_EV, dsp_depots, selected_locker_nodes,
-                                       package_destination_ids, destinations,destination_lookup, num_instance_LMs,
-                                                instance_network, closest_lockers_map_back)
-    
+    res_filename = 'output/results_4.xlsx'
+    optfunctions.write_instance_results_to_file(res_filename, y_sol_cl, lamda_df, selected_locker_nodes, max_locker_capacities,
+                                       xm_Sol_DFs, t_Sol_DFs, emissions_matrix_EV, dsp_depots, 
+                                       package_destination_ids, destinations, destination_lookup, num_instance_LMs, instance_network)
 
    
         

@@ -1,5 +1,6 @@
 import numpy as np
 import pandas as pd
+
 import math
 from docplex.mp.model import Model
 from geopy.distance import geodesic
@@ -88,7 +89,10 @@ def output_problem_instance(complete_network, instance_network):
     comp_net_microhubs_df.reset_index(inplace=True,drop=True)
     instance_microhubs_df = instance_network[instance_network['type']=='locker']
     instance_microhubs_df.reset_index(inplace=True,drop=True)
-    locker_config, locker_lookup = find_nearest_locations(instance_microhubs_df, comp_net_microhubs_df)
+    locker_config, locker_lookup_orig = find_nearest_locations(instance_microhubs_df, comp_net_microhubs_df)
+    # Offset locker lookup
+    locker_offset = complete_network[complete_network['type'].str.contains('locker', case=False)].iloc[0]['node']
+    locker_lookup = {key: value+locker_offset for key, value in locker_lookup_orig.items()}
 
     # Destination matching
     comp_net_destinations_df = complete_network[complete_network['type']=='package_destination']
@@ -101,13 +105,15 @@ def output_problem_instance(complete_network, instance_network):
     problem_config = lm_config + locker_config + package_config
 
     # Instance microhub capacities
-    max_locker_capacities = comp_net_microhubs_df.set_index('node')['locker_capacity'].to_dict()
-    selected_locker_nodes = [a*b for a,b in zip(locker_config, list(max_locker_capacities.keys()))]
-    selected_locker_nodes = [s for s in selected_locker_nodes if s>0]
+    # max_locker_capacities = comp_net_microhubs_df.set_index('node')['locker_capacity'].to_dict()
+    max_locker_capacities = instance_microhubs_df.set_index('node')['locker_capacity'].to_dict()
+    selected_locker_nodes = [value for value in locker_lookup.values()]
+    selected_locker_capacities = {node: capacity for node, capacity in zip(selected_locker_nodes, max_locker_capacities.values())}
+
 
     # Create problem instance
     package_ids, destinations, dsp_depots, dsp_d_nodes, dsp_d_arcs = get_problem_instance_info(complete_network, problem_config, selected_locker_nodes)
-    return package_ids, destinations, dsp_depots, dsp_d_nodes, dsp_d_arcs, lm_config, selected_locker_nodes, max_locker_capacities, lm_lookup, locker_lookup, destination_lookup
+    return package_ids, destinations, dsp_depots, dsp_d_nodes, dsp_d_arcs, lm_config, selected_locker_nodes, selected_locker_capacities, max_locker_capacities, lm_lookup, locker_lookup, destination_lookup
 
 def map_closest_lockers_back(comp_net_locker_dfs, inst_locker_dfs):
     # Find the closest node in inst_locker_dfs for each node in comp_net_locker_dfs using Geodesic distance
@@ -244,11 +250,12 @@ def compute_emissions_EV(battery_capacity, emission_factor, generation_percentag
     return E_ijkm
 
 def solve_CL_leader(max_num_DSPs, lm_config, max_num_nodes, max_num_destinations, package_destination_ids, all_locker_nodes,
-                    selected_locker_nodes, max_locker_capacities, learned_constraint, satellite_penalty):   
+                    selected_locker_nodes, max_locker_capacities, selected_locker_capacities, learned_constraint, satellite_penalty):   
     model = Model(name = 'CL_Leader')
     model.parameters.timelimit = 900 # seconds
     model.parameters.mip.tolerances.mipgap = 1e-2
     model.parameters.emphasis.mip = 1 # prioritize feasible solutions
+    model.parameters.threads = 4    
     
     # --- Optimization ---
     # Create a dict that maps z_f to y_p_d and lamda_p_s
@@ -276,11 +283,12 @@ def solve_CL_leader(max_num_DSPs, lm_config, max_num_nodes, max_num_destinations
     # z_f is based on value of y and lamda
     z = {f: model.binary_var(name='z_%d' % f) for f in range(len(z_feature_names))}
     # last mile emissions
-#     emissions_last = {d: model.continuous_var(lb=0.0, name='last_emission_%d' % d) for d in instance_D}  
     emissions_last = model.continuous_var(lb=0.0, name='last_emission')    
 
     # Number of satellites used
-    phi = {s: model.binary_var(name='phi_%d' % s) for s in all_locker_nodes}    
+    # phi = {s: model.binary_var(name='phi_%d' % s) for s in all_locker_nodes}   
+    phi = {s: model.binary_var(name='phi_%d' % s) for s in selected_locker_nodes}  
+    # print('all_locker_nodes=',all_locker_nodes)
     
     
     # ----- Leader Objective Function: Minimize the emissions as well as the amount of satellites and cost -----
@@ -306,7 +314,8 @@ def solve_CL_leader(max_num_DSPs, lm_config, max_num_nodes, max_num_destinations
     # ----- Leader Constraints -----
     # Respect satellites' capacity constraint
     for s in selected_locker_nodes:
-        model.add_constraint(model.sum(lamda[p, s] for p in delivery_P) <= max_locker_capacities[s])
+        model.add_constraint(model.sum(lamda[p, s] for p in delivery_P) <= selected_locker_capacities[s])
+        
     
     # A parcel should only be assigned to one satellite
     for p in delivery_P:
@@ -347,11 +356,12 @@ def solve_CL_leader(max_num_DSPs, lm_config, max_num_nodes, max_num_destinations
     
     if model.solve_status.name == 'OPTIMAL_SOLUTION' or model.solve_status.name == 'FEASIBLE_SOLUTION':
         sol_df = solution.as_df() 
+
     # Extract y and lamda from sol_df
     y_sol_cl = extract_y(sol_df, max_num_destinations, sum(lm_config))
-    lamda_sol_cl = extract_lamda(sol_df, max_num_destinations, max_num_nodes)
+    lamda_sol_cl, lamda_df = extract_lamda(sol_df, max_num_destinations, max_num_nodes)
     
-    return y_sol_cl, lamda_sol_cl
+    return y_sol_cl, lamda_sol_cl, lamda_df
 
 def Last_Mile_Follower(y, lamda, V2d, A2d, fol_depot, locker_nodes, packages, destinations, num_vehicles_for_follower,
                       distance_matrix, travel_time_matrix, num_time_periods_matrix, bigM_matrix,
@@ -360,6 +370,7 @@ def Last_Mile_Follower(y, lamda, V2d, A2d, fol_depot, locker_nodes, packages, de
     model.parameters.timelimit = time_limit_seconds
     model.parameters.mip.tolerances.mipgap = 1e-2
     model.parameters.emphasis.mip = 1
+    model.parameters.threads = 4
     
     # --- Sets ---
     
@@ -518,7 +529,7 @@ def extract_lamda(sol_df, num_original_destinations, max_num_nodes):
     for p, s in zip(lamda_df['p'], lamda_df['s']):
         lamda_sol_cl[p, s] = 1
 
-    return lamda_sol_cl
+    return lamda_sol_cl, lamda_df
 
 def extract_t(lastmiler_final_sol):
     t_df = None    
@@ -755,19 +766,19 @@ def get_distance_and_emissions(xm_sol_dfs_final, emissions_matrix_EV):
     
     return dist_emm_df
 
-def get_locker_assignments(lamda_final):
-    assignments = {}
+def get_locker_assignments(lamda_df, selected_locker_nodes, max_locker_capacities, destination_lookup):
+    # Add a new column 'Package ID' by replacing the values in 'p' using reversed_package_lookup
+    reversed_package_lookup = {v: k for k, v in destination_lookup.items()}
+    lamda_df['Package ID'] = lamda_df['p'].map(reversed_package_lookup)
+   
+    # Add the 'Locker node' column by mapping the 's' column using reverse_locker_map
+    reverse_locker_map = {node: size for node, size in zip(selected_locker_nodes, max_locker_capacities.keys())}
+    lamda_df['Locker node'] = lamda_df['s'].map(reverse_locker_map)
 
-    # Iterate over columns
-    for col in range(lamda_final.shape[1]):
-        # Get the indices where the value is 1
-        indices = np.where(lamda_final[:, col] == 1)[0]
-
-        # If there are indices, add them to the assignments dictionary
-        if len(indices) > 0:
-            assignments[col] = indices.tolist()
-            
-    return assignments
+    # Drop columns 'p' and 's' from the dataframe
+    lamda_df = lamda_df.drop(columns=['p', 's'])   
+    lamda_df = lamda_df.sort_values(by=['Package ID'])         
+    return lamda_df
 
 def get_lastmiler_assgt(y_sol_final):
     y_sol_final = np.round(y_sol_final)
@@ -776,44 +787,19 @@ def get_lastmiler_assgt(y_sol_final):
         index = next((i for i, x in enumerate(row) if x == 1), None)
         indices.append(index if index is not None else -1)
     return indices
-
-
-def write_instance_results_to_file(res_filename, y_sol_cl, lamda_sol_cl, xm_Sol_DFs, t_Sol_DFs,
-                                   distance_matrix, emissions_matrix_EV, dsp_depots, locker_nodes,
-                                   packages, destinations, destination_lookup, num_instance_LMs, instance_network,
-                                  closest_lockers_map_back):
-    
-    
+ 
+def write_instance_results_to_file(res_filename, y_sol_cl, lamda_df, selected_locker_nodes, max_locker_capacities,
+                                   xm_Sol_DFs, t_Sol_DFs, emissions_matrix_EV, dsp_depots,
+                                   packages, destinations, destination_lookup, num_instance_LMs, instance_network):    
     # Get distance travelled and total last-mile emissions
     dist_emm_df = get_distance_and_emissions(xm_Sol_DFs, emissions_matrix_EV)
       
     # Get package assignments to Lockers
-    locker_assignments = get_locker_assignments(lamda_sol_cl)
-    locker_ass_df = pd.DataFrame([(k, v) for k, vals in locker_assignments.items() for v in vals], columns=['Locker node', 'Package ID'])
+    locker_ass_df = get_locker_assignments(lamda_df, selected_locker_nodes, max_locker_capacities, destination_lookup)
     
-    original_ids = []
-    value_to_key_lookup = {v: k for k, v in destination_lookup.items()}
-    for i in range(len(locker_ass_df)):
-        key = value_to_key_lookup.get(locker_ass_df['Package ID'][i], 'Key not found')
-        original_ids.append(key)      
-    locker_ass_df['Package ID'] = original_ids
-    locker_ass_df = locker_ass_df.sort_values(by=['Package ID'])
-    
-    locker_ids = []
-    key_to_value_lookup = {k: v for k, v in closest_lockers_map_back.items()}
-    for i in range(len(locker_ass_df)):
-        value = key_to_value_lookup.get(locker_ass_df['Locker node'][i], 'Key not found')
-        locker_ids.append(value)      
-    locker_ass_df['Locker node new'] = locker_ids    
-    locker_ass_df.drop(columns=['Locker node'], inplace=True)     
-    locker_ass_df = locker_ass_df[['Locker node new', 'Package ID']]
-    locker_ass_df.rename(columns={'Locker node new': 'Locker node', 'Package ID': 'Package ID'}, inplace=True)
-    
-    locker_ass_df.reset_index(inplace=True, drop=True)
-
     # Get package arrival times
     times_at_dest_df = get_times_at_destinations(t_Sol_DFs, y_sol_cl, packages, destinations,
-                          dsp_depots, locker_nodes,destination_lookup, num_instance_LMs, instance_network)
+                          dsp_depots, selected_locker_nodes, destination_lookup, num_instance_LMs, instance_network)
     
     # Write all to file
     with pd.ExcelWriter(res_filename) as writer:  
@@ -822,4 +808,3 @@ def write_instance_results_to_file(res_filename, y_sol_cl, lamda_sol_cl, xm_Sol_
         times_at_dest_df.to_excel(writer, sheet_name='Package Arrival Times', index=False)
 
     return
-
